@@ -23,6 +23,25 @@ import { BusEvent } from "../bus/bus-event"
 import { Bus } from "@/bus"
 import { TuiEvent } from "@/cli/cmd/tui/event"
 import open from "open"
+import { McpCallContext } from "./context"
+
+function createContextAwareFetch(baseFetch?: typeof globalThis.fetch): typeof globalThis.fetch {
+  const fetchFn = baseFetch ?? globalThis.fetch
+  const impl = (input: Parameters<typeof globalThis.fetch>[0], init: Parameters<typeof globalThis.fetch>[1]) => {
+    const ctx = McpCallContext.current
+    if (ctx) {
+      const headers = new Headers(init?.headers)
+      if (ctx.mcpHeaders) {
+        for (const [key, value] of Object.entries(ctx.mcpHeaders)) {
+          headers.set(key, value)
+        }
+      }
+      return fetchFn(input, { ...init, headers })
+    }
+    return fetchFn(input, init)
+  }
+  return Object.assign(impl, fetchFn) as typeof globalThis.fetch
+}
 
 export namespace MCP {
   const log = Log.create({ service: "mcp" })
@@ -362,12 +381,14 @@ export namespace MCP {
         )
       }
 
+      const contextFetch = createContextAwareFetch()
       const transports: Array<{ name: string; transport: TransportWithAuth }> = [
         {
           name: "StreamableHTTP",
           transport: new StreamableHTTPClientTransport(new URL(mcp.url), {
             authProvider,
             requestInit: mcp.headers ? { headers: mcp.headers } : undefined,
+            fetch: contextFetch,
           }),
         },
         {
@@ -375,6 +396,7 @@ export namespace MCP {
           transport: new SSEClientTransport(new URL(mcp.url), {
             authProvider,
             requestInit: mcp.headers ? { headers: mcp.headers } : undefined,
+            fetch: contextFetch,
           }),
         },
       ]

@@ -25,6 +25,7 @@ import MAX_STEPS from "../session/prompt/max-steps.txt"
 import { defer } from "../util/defer"
 import { ToolRegistry } from "../tool/registry"
 import { MCP } from "../mcp"
+import { McpCallContext } from "../mcp/context"
 import { LSP } from "../lsp"
 import { ReadTool } from "../tool/read"
 import { FileTime } from "../file/time"
@@ -111,6 +112,7 @@ export namespace SessionPrompt {
     format: MessageV2.Format.optional(),
     system: z.string().optional(),
     variant: z.string().optional(),
+    mcpHeaders: z.record(z.string(), z.string()).optional(),
     parts: z.array(
       z.discriminatedUnion("type", [
         MessageV2.TextPart.omit({
@@ -184,7 +186,7 @@ export namespace SessionPrompt {
       return message
     }
 
-    return loop({ sessionID: input.sessionID })
+    return loop({ sessionID: input.sessionID, mcpHeaders: input.mcpHeaders })
   })
 
   export async function resolvePromptParts(template: string): Promise<PromptInput["parts"]> {
@@ -273,6 +275,7 @@ export namespace SessionPrompt {
   export const LoopInput = z.object({
     sessionID: SessionID.zod,
     resume_existing: z.boolean().optional(),
+    mcpHeaders: z.record(z.string(), z.string()).optional(),
   })
   export const loop = fn(LoopInput, async (input) => {
     const { sessionID, resume_existing } = input
@@ -611,6 +614,7 @@ export namespace SessionPrompt {
         processor,
         bypassAgentCheck,
         messages: msgs,
+        mcpHeaders: input.mcpHeaders,
       })
 
       // Inject StructuredOutput tool if JSON schema mode enabled
@@ -750,6 +754,7 @@ export namespace SessionPrompt {
     processor: SessionProcessor.Info
     bypassAgentCheck: boolean
     messages: MessageV2.WithParts[]
+    mcpHeaders?: Record<string, string>
   }) {
     using _ = log.time("resolveTools")
     const tools: Record<string, AITool> = {}
@@ -865,7 +870,12 @@ export namespace SessionPrompt {
           always: ["*"],
         })
 
-        const result = await execute(args, opts)
+        const result = await McpCallContext.provide(
+          {
+            mcpHeaders: input.mcpHeaders,
+          },
+          () => execute(args, opts),
+        )
 
         await Plugin.trigger(
           "tool.execute.after",
