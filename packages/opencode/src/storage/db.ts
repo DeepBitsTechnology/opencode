@@ -1,10 +1,9 @@
-import { Database as BunDatabase } from "bun:sqlite"
-import { drizzle, type SQLiteBunDatabase } from "drizzle-orm/bun-sqlite"
-import { migrate } from "drizzle-orm/bun-sqlite/migrator"
-import { type SQLiteTransaction } from "drizzle-orm/sqlite-core"
+import { createClient, type Client as LibsqlClient } from "@libsql/client"
+import { type LibSQLDatabase, drizzle } from "drizzle-orm/libsql"
+import { migrate } from "drizzle-orm/libsql/migrator"
+import crypto from "node:crypto"
 export * from "drizzle-orm"
 import { Context } from "../util/context"
-import { lazy } from "../util/lazy"
 import { Global } from "../global"
 import { Log } from "../util/log"
 import { NamedError } from "@opencode-ai/util/error"
@@ -37,14 +36,16 @@ export namespace Database {
   })
 
   type Schema = typeof schema
-  export type Transaction = SQLiteTransaction<"sync", void, Schema>
+  type Client = LibSQLDatabase<Schema>
 
-  type Client = SQLiteBunDatabase
+  export type Transaction = Client
+  export type TxOrDb = Client
 
   type Journal = { sql: string; timestamp: number; name: string }[]
 
   const state = {
-    sqlite: undefined as BunDatabase | undefined,
+    libsqlClient: undefined as LibsqlClient | undefined,
+    clientPromise: undefined as Promise<Client> | undefined,
   }
 
   function time(tag: string) {
@@ -80,26 +81,66 @@ export namespace Database {
     return sql.sort((a, b) => a.timestamp - b.timestamp)
   }
 
-  export const Client = lazy(() => {
+  async function applyBundledMigrations(libsqlClient: LibsqlClient, entries: Journal) {
+    const table = "__drizzle_migrations"
+    await libsqlClient.execute(
+      `CREATE TABLE IF NOT EXISTS "${table}" (id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL, created_at INTEGER, name TEXT, applied_at TEXT)`,
+    )
+    const { rows } = await libsqlClient.execute(`SELECT name FROM "${table}"`)
+    const applied = new Set(rows.map((r) => String(r.name)))
+    for (const entry of entries) {
+      if (applied.has(entry.name)) continue
+      const hash = crypto.createHash("sha256").update(entry.sql).digest("hex")
+      for (const stmt of entry.sql.split("--> statement-breakpoint")) {
+        const s = stmt.trim()
+        if (s) await libsqlClient.execute(s)
+      }
+      await libsqlClient.execute({
+        sql: `INSERT INTO "${table}" (hash, created_at, name, applied_at) VALUES (?, ?, ?, ?)`,
+        args: [hash, entry.timestamp, entry.name, new Date().toISOString()],
+      })
+    }
+  }
+
+  async function initClient(): Promise<Client> {
     log.info("opening database", { path: Path })
 
-    const sqlite = new BunDatabase(Path, { create: true })
-    state.sqlite = sqlite
+    // libsql's native TLS (rustls + native-certs) needs SSL_CERT_FILE set in
+    // environments where the system cert store isn't auto-detected (e.g. bundled binaries).
+    if (!process.env["SSL_CERT_FILE"]) {
+      const candidates =
+        process.platform === "darwin"
+          ? ["/etc/ssl/cert.pem"]
+          : ["/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt", "/etc/ssl/ca-bundle.pem"]
+      for (const cert of candidates) {
+        if (existsSync(cert)) {
+          process.env["SSL_CERT_FILE"] = cert
+          break
+        }
+      }
+    }
 
-    sqlite.run("PRAGMA journal_mode = WAL")
-    sqlite.run("PRAGMA synchronous = NORMAL")
-    sqlite.run("PRAGMA busy_timeout = 5000")
-    sqlite.run("PRAGMA cache_size = -64000")
-    sqlite.run("PRAGMA foreign_keys = ON")
-    sqlite.run("PRAGMA wal_checkpoint(PASSIVE)")
+    const isRemote = !!Flag.OPENCODE_DB_URL && !Flag.OPENCODE_DB_URL.startsWith("file:")
 
-    const db = drizzle({ client: sqlite })
+    const libsqlClient = isRemote
+      ? createClient({
+          url: Flag.OPENCODE_DB_URL!,
+          authToken: Flag.OPENCODE_DB_TOKEN,
+        })
+      : createClient({
+          url: Flag.OPENCODE_DB_URL ?? `file:${Path}`,
+        })
+
+    state.libsqlClient = libsqlClient
+
+    const db = drizzle({ client: libsqlClient, schema })
 
     // Apply schema migrations
     const entries =
       typeof OPENCODE_MIGRATIONS !== "undefined"
         ? OPENCODE_MIGRATIONS
         : migrations(path.join(import.meta.dirname, "../../migration"))
+
     if (entries.length > 0) {
       log.info("applying migrations", {
         count: entries.length,
@@ -110,34 +151,54 @@ export namespace Database {
           item.sql = "select 1;"
         }
       }
-      migrate(db, entries)
+      if (typeof OPENCODE_MIGRATIONS !== "undefined") {
+        await applyBundledMigrations(libsqlClient, entries)
+      } else {
+        await migrate(db, { migrationsFolder: path.join(import.meta.dirname, "../../migration") })
+      }
     }
 
     return db
-  })
-
-  export function close() {
-    const sqlite = state.sqlite
-    if (!sqlite) return
-    sqlite.close()
-    state.sqlite = undefined
-    Client.reset()
   }
 
-  export type TxOrDb = SQLiteTransaction<"sync", void, any, any> | Client
+  export const Client = {
+    reset() {
+      state.clientPromise = undefined
+      state.libsqlClient = undefined
+    },
+    get: async (): Promise<Client> => {
+      if (!state.clientPromise) {
+        state.clientPromise = initClient()
+      }
+      return state.clientPromise
+    },
+  }
+
+  export async function close() {
+    state.libsqlClient?.close()
+    state.libsqlClient = undefined
+    state.clientPromise = undefined
+  }
+
+  export async function sync() {
+    if (state.libsqlClient && "sync" in state.libsqlClient) {
+      await (state.libsqlClient as any).sync()
+    }
+  }
 
   const ctx = Context.create<{
     tx: TxOrDb
     effects: (() => void | Promise<void>)[]
   }>("database")
 
-  export function use<T>(callback: (trx: TxOrDb) => T): T {
+  export async function use<T>(callback: (trx: TxOrDb) => Promise<T>): Promise<T> {
     try {
-      return callback(ctx.use().tx)
+      return await callback(ctx.use().tx)
     } catch (err) {
       if (err instanceof Context.NotFound) {
+        const client = await Client.get()
         const effects: (() => void | Promise<void>)[] = []
-        const result = ctx.provide({ effects, tx: Client() }, () => callback(Client()))
+        const result = await ctx.provide({ effects, tx: client }, () => callback(client))
         for (const effect of effects) effect()
         return result
       }
@@ -153,13 +214,14 @@ export namespace Database {
     }
   }
 
-  export function transaction<T>(callback: (tx: TxOrDb) => T): T {
+  export async function transaction<T>(callback: (tx: TxOrDb) => Promise<T>): Promise<T> {
     try {
-      return callback(ctx.use().tx)
+      return await callback(ctx.use().tx)
     } catch (err) {
       if (err instanceof Context.NotFound) {
+        const client = await Client.get()
         const effects: (() => void | Promise<void>)[] = []
-        const result = (Client().transaction as any)((tx: TxOrDb) => {
+        const result = await (client as any).transaction(async (tx: TxOrDb) => {
           return ctx.provide({ tx, effects }, () => callback(tx))
         })
         for (const effect of effects) effect()

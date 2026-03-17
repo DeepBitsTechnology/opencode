@@ -534,7 +534,7 @@ export namespace MessageV2 {
     const ids = rows.map((row) => row.id)
     const partByMessage = new Map<string, MessageV2.Part[]>()
     if (ids.length > 0) {
-      const partRows = Database.use((db) =>
+      const partRows = await Database.use(async (db) =>
         db
           .select()
           .from(PartTable)
@@ -802,7 +802,7 @@ export namespace MessageV2 {
       const where = before
         ? and(eq(MessageTable.session_id, input.sessionID), older(before))
         : eq(MessageTable.session_id, input.sessionID)
-      const rows = Database.use((db) =>
+      const rows = await Database.use(async (db) =>
         db
           .select()
           .from(MessageTable)
@@ -812,7 +812,7 @@ export namespace MessageV2 {
           .all(),
       )
       if (rows.length === 0) {
-        const row = Database.use((db) =>
+        const row = await Database.use(async (db) =>
           db.select({ id: SessionTable.id }).from(SessionTable).where(eq(SessionTable.id, input.sessionID)).get(),
         )
         if (!row) throw new NotFoundError({ message: `Session not found: ${input.sessionID}` })
@@ -850,7 +850,7 @@ export namespace MessageV2 {
   })
 
   export const parts = fn(MessageID.zod, async (message_id) => {
-    const rows = Database.use((db) =>
+    const rows = await Database.use(async (db) =>
       db.select().from(PartTable).where(eq(PartTable.message_id, message_id)).orderBy(PartTable.id).all(),
     )
     return rows.map(
@@ -864,7 +864,7 @@ export namespace MessageV2 {
       messageID: MessageID.zod,
     }),
     async (input): Promise<WithParts> => {
-      const row = Database.use((db) =>
+      const row = await Database.use(async (db) =>
         db
           .select()
           .from(MessageTable)

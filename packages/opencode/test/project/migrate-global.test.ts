@@ -71,7 +71,7 @@ describe("migrateFromGlobal", () => {
     expect(real.id).not.toBe(ProjectID.global)
 
     // 4. The session should have been migrated to the real project ID
-    const row = Database.use((db) => db.select().from(SessionTable).where(eq(SessionTable.id, id)).get())
+    const row = await Database.use(async (db) => db.select().from(SessionTable).where(eq(SessionTable.id, id)).get())
     expect(row).toBeDefined()
     expect(row!.project_id).toBe(real.id)
   })
@@ -95,7 +95,7 @@ describe("migrateFromGlobal", () => {
     //    so the current code skips migration entirely. This is the bug.
     await Project.fromDirectory(tmp.path)
 
-    const row = Database.use((db) => db.select().from(SessionTable).where(eq(SessionTable.id, id)).get())
+    const row = await Database.use(async (db) => db.select().from(SessionTable).where(eq(SessionTable.id, id)).get())
     expect(row).toBeDefined()
     expect(row!.project_id).toBe(project.id)
   })
@@ -114,7 +114,7 @@ describe("migrateFromGlobal", () => {
 
     await Project.fromDirectory(tmp.path)
 
-    const row = Database.use((db) => db.select().from(SessionTable).where(eq(SessionTable.id, id)).get())
+    const row = await Database.use(async (db) => db.select().from(SessionTable).where(eq(SessionTable.id, id)).get())
     expect(row).toBeDefined()
     expect(row!.project_id).toBe(ProjectID.global)
   })
@@ -132,7 +132,7 @@ describe("migrateFromGlobal", () => {
 
     await Project.fromDirectory(tmp.path)
 
-    const row = Database.use((db) => db.select().from(SessionTable).where(eq(SessionTable.id, id)).get())
+    const row = await Database.use(async (db) => db.select().from(SessionTable).where(eq(SessionTable.id, id)).get())
     expect(row).toBeDefined()
     // Should remain under "global" — not stolen
     expect(row!.project_id).toBe(ProjectID.global)

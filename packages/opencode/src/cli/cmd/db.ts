@@ -108,11 +108,20 @@ const MigrateCommand = cmd({
   },
 })
 
+const SyncCommand = cmd({
+  command: "sync",
+  describe: "sync local database replica with remote Turso database",
+  handler: async () => {
+    await Database.sync()
+    process.stdout.write("Database sync complete." + EOL)
+  },
+})
+
 export const DbCommand = cmd({
   command: "db",
   describe: "database tools",
   builder: (yargs: Argv) => {
-    return yargs.command(QueryCommand).command(PathCommand).command(MigrateCommand).demandCommand()
+    return yargs.command(QueryCommand).command(PathCommand).command(MigrateCommand).command(SyncCommand).demandCommand()
   },
   handler: () => {},
 })

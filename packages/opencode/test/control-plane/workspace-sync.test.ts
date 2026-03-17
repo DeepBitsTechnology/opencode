@@ -88,7 +88,7 @@ describe("control-plane/workspace.startSyncing", () => {
       GlobalBus.on("event", listener)
     })
 
-    const sync = Workspace.startSyncing(project)
+    const sync = await Workspace.startSyncing(project)
     await Promise.race([
       done,
       new Promise((_, reject) => setTimeout(() => reject(new Error("timed out waiting for sync event")), 2000)),

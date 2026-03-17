@@ -3,14 +3,15 @@ import { Effect, Layer, Option } from "effect"
 
 import { AccountRepo } from "../../src/account/repo"
 import { AccessToken, AccountID, OrgID, RefreshToken } from "../../src/account/schema"
-import { Database } from "../../src/storage/db"
+import { Database, sql } from "../../src/storage/db"
 import { testEffect } from "../fixture/effect"
 
 const truncate = Layer.effectDiscard(
-  Effect.sync(() => {
-    const db = Database.Client()
-    db.run(/*sql*/ `DELETE FROM account_state`)
-    db.run(/*sql*/ `DELETE FROM account`)
+  Effect.promise(async () => {
+    await Database.use(async (db) => {
+      await db.run(sql`DELETE FROM account_state`)
+      await db.run(sql`DELETE FROM account`)
+    })
   }),
 )
 

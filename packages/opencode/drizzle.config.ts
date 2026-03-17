@@ -1,10 +1,11 @@
 import { defineConfig } from "drizzle-kit"
 
 export default defineConfig({
-  dialect: "sqlite",
+  dialect: "turso",
   schema: "./src/**/*.sql.ts",
   out: "./migration",
   dbCredentials: {
-    url: "/home/thdxr/.local/share/opencode/opencode.db",
+    url: process.env["OPENCODE_DB_URL"] ?? `file:${process.env["HOME"]}/.local/share/opencode/opencode.db`,
+    authToken: process.env["OPENCODE_DB_TOKEN"],
   },
 })

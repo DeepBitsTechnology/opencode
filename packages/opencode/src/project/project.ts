@@ -217,7 +217,7 @@ export namespace Project {
       }
     })
 
-    const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, data.id)).get())
+    const row = await Database.use(async (db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, data.id)).get())
     const existing = row
       ? fromRow(row)
       : {
@@ -269,14 +269,14 @@ export namespace Project {
       sandboxes: result.sandboxes,
       commands: result.commands,
     }
-    Database.use((db) =>
+    await Database.use(async (db) =>
       db.insert(ProjectTable).values(insert).onConflictDoUpdate({ target: ProjectTable.id, set: updateSet }).run(),
     )
     // Runs after upsert so the target project row exists (FK constraint).
     // Runs on every startup because sessions created before git init
     // accumulate under "global" and need migrating whenever they appear.
     if (data.id !== ProjectID.global) {
-      Database.use((db) =>
+      await Database.use(async (db) =>
         db
           .update(SessionTable)
           .set({ project_id: data.id })
@@ -317,8 +317,8 @@ export namespace Project {
     return
   }
 
-  export function setInitialized(id: ProjectID) {
-    Database.use((db) =>
+  export async function setInitialized(id: ProjectID) {
+    await Database.use(async (db) =>
       db
         .update(ProjectTable)
         .set({
@@ -329,18 +329,13 @@ export namespace Project {
     )
   }
 
-  export function list() {
-    return Database.use((db) =>
-      db
-        .select()
-        .from(ProjectTable)
-        .all()
-        .map((row) => fromRow(row)),
-    )
+  export async function list() {
+    const rows = await Database.use(async (db) => db.select().from(ProjectTable).all())
+    return rows.map(fromRow)
   }
 
-  export function get(id: ProjectID): Info | undefined {
-    const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get())
+  export async function get(id: ProjectID): Promise<Info | undefined> {
+    const row = await Database.use(async (db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get())
     if (!row) return undefined
     return fromRow(row)
   }
@@ -369,7 +364,7 @@ export namespace Project {
     }),
     async (input) => {
       const id = ProjectID.make(input.projectID)
-      const result = Database.use((db) =>
+      const result = await Database.use(async (db) =>
         db
           .update(ProjectTable)
           .set({
@@ -396,7 +391,7 @@ export namespace Project {
   )
 
   export async function sandboxes(id: ProjectID) {
-    const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get())
+    const row = await Database.use(async (db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get())
     if (!row) return []
     const data = fromRow(row)
     const valid: string[] = []
@@ -408,11 +403,11 @@ export namespace Project {
   }
 
   export async function addSandbox(id: ProjectID, directory: string) {
-    const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get())
+    const row = await Database.use(async (db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get())
     if (!row) throw new Error(`Project not found: ${id}`)
     const sandboxes = [...row.sandboxes]
     if (!sandboxes.includes(directory)) sandboxes.push(directory)
-    const result = Database.use((db) =>
+    const result = await Database.use(async (db) =>
       db
         .update(ProjectTable)
         .set({ sandboxes, time_updated: Date.now() })
@@ -432,10 +427,10 @@ export namespace Project {
   }
 
   export async function removeSandbox(id: ProjectID, directory: string) {
-    const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get())
+    const row = await Database.use(async (db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get())
     if (!row) throw new Error(`Project not found: ${id}`)
     const sandboxes = row.sandboxes.filter((s) => s !== directory)
-    const result = Database.use((db) =>
+    const result = await Database.use(async (db) =>
       db
         .update(ProjectTable)
         .set({ sandboxes, time_updated: Date.now() })
