@@ -40,6 +40,7 @@ export namespace LLM {
     tools: Record<string, Tool>
     retries?: number
     toolChoice?: "auto" | "required" | "none"
+    additionalFields?: Record<string, unknown>
   }
 
   export type StreamOutput = StreamTextResult<ToolSet, unknown>
@@ -108,6 +109,9 @@ export namespace LLM {
       mergeDeep(input.agent.options),
       mergeDeep(variant),
     )
+    if (input.additionalFields) {
+      Object.assign(options, input.additionalFields)
+    }
     if (isCodex) {
       options.instructions = SystemPrompt.instructions()
     }

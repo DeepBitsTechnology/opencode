@@ -113,6 +113,7 @@ export namespace SessionPrompt {
     system: z.string().optional(),
     variant: z.string().optional(),
     mcpHeaders: z.record(z.string(), z.string()).optional(),
+    additionalFields: z.record(z.string(), z.unknown()).optional(),
     parts: z.array(
       z.discriminatedUnion("type", [
         MessageV2.TextPart.omit({
@@ -186,7 +187,7 @@ export namespace SessionPrompt {
       return message
     }
 
-    return loop({ sessionID: input.sessionID, mcpHeaders: input.mcpHeaders })
+    return loop({ sessionID: input.sessionID, mcpHeaders: input.mcpHeaders, additionalFields: input.additionalFields })
   })
 
   export async function resolvePromptParts(template: string): Promise<PromptInput["parts"]> {
@@ -276,6 +277,7 @@ export namespace SessionPrompt {
     sessionID: SessionID.zod,
     resume_existing: z.boolean().optional(),
     mcpHeaders: z.record(z.string(), z.string()).optional(),
+    additionalFields: z.record(z.string(), z.unknown()).optional(),
   })
   export const loop = fn(LoopInput, async (input) => {
     const { sessionID, resume_existing } = input
@@ -688,6 +690,7 @@ export namespace SessionPrompt {
         tools,
         model,
         toolChoice: format.type === "json_schema" ? "required" : undefined,
+        additionalFields: input.additionalFields,
       })
 
       // If structured output was captured, save it and exit immediately
