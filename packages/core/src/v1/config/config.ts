@@ -170,6 +170,10 @@ export const Info = Schema.Struct({
     Schema.Struct({
       disable_paste_summary: Schema.optional(Schema.Boolean),
       batch_tool: Schema.optional(Schema.Boolean).annotate({ description: "Enable the batch tool" }),
+      small_model_enabled: Schema.optional(Schema.Boolean).annotate({
+        description:
+          "Enable small-model requests such as session title generation. Defaults to false; set to true to opt in.",
+      }),
       openTelemetry: Schema.optional(Schema.Boolean).annotate({
         description: "Enable OpenTelemetry spans for AI SDK calls (using the 'experimental_telemetry' flag)",
       }),
