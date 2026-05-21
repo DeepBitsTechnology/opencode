@@ -31,6 +31,8 @@ import { LocationServiceMap, locationServiceMapLayer } from "@opencode-ai/core/l
 import { Reference } from "@opencode-ai/core/reference"
 import { Location } from "@opencode-ai/core/location"
 import { PluginV2 } from "@opencode-ai/core/plugin"
+import type { Session } from "@/session/session"
+import { asRecord } from "@/util/record"
 
 export const Info = Schema.Struct({
   name: Schema.String,
@@ -69,6 +71,7 @@ export interface Interface {
   readonly generate: (input: {
     description: string
     model?: { providerID: ProviderV2.ID; modelID: ModelV2.ID }
+    sessionMetadata?: Session.Info["metadata"]
   }) => Effect.Effect<
     {
       identifier: string
@@ -368,8 +371,10 @@ const layer = Layer.effect(
       generate: Effect.fn("Agent.generate")(function* (input: {
         description: string
         model?: { providerID: ProviderV2.ID; modelID: ModelV2.ID }
+        sessionMetadata?: Session.Info["metadata"]
       }) {
         const cfg = yield* config.get()
+        const llmFields = asRecord(input.sessionMetadata?.llmFields)
         const model = input.model ?? (yield* provider.defaultModel())
         const resolved = yield* provider.getModel(model.providerID, model.modelID)
         const language = yield* provider.getLanguage(resolved)
@@ -390,7 +395,8 @@ const layer = Layer.effect(
             isEnabled: cfg.experimental?.openTelemetry,
             tracer,
             metadata: {
-              userId: cfg.username ?? "unknown",
+              userId: typeof llmFields?.user === "string" ? llmFields.user : (cfg.username ?? "unknown"),
+              sessionId: typeof llmFields?.session_id === "string" ? llmFields.session_id : "",
             },
           },
           temperature: 0.3,

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { Effect } from "effect"
 import { ProviderTransform } from "@/provider/transform"
 import { LLMRequestPrep } from "@/session/llm/request"
+import { InstanceRef } from "@/effect/instance-ref"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { ModelsDev } from "@opencode-ai/core/models-dev"
@@ -9,6 +10,12 @@ import { generateText, jsonSchema, type ModelMessage } from "ai"
 import { createAmazonBedrock, type AmazonBedrockLanguageModelOptions } from "@ai-sdk/amazon-bedrock"
 import { createAnthropic } from "@ai-sdk/anthropic"
 import { createVertexAnthropic } from "@ai-sdk/google-vertex/anthropic"
+
+const instanceContext = {
+  directory: "/tmp/opencode-test",
+  worktree: "/tmp/opencode-test",
+  project: { id: "test" },
+} as any
 
 describe("ProviderTransform.options - setCacheKey", () => {
   const sessionID = "test-session-123"
@@ -582,12 +589,55 @@ describe("ProviderTransform.options - gpt-5 textVerbosity", () => {
         } as any,
         flags: { outputTokenMax: 32_000, client: "test" } as any,
         isWorkflow: false,
-      }),
+      }).pipe(Effect.provideService(InstanceRef, instanceContext)),
     )
     expect(result.params.options.reasoningEffort).toBe("high")
     expect(result.params.options.reasoningSummary).toBeUndefined()
     expect(result.params.options.include).toBeUndefined()
     expect(result.tools.lookup.strict).toBe(false)
+  })
+
+  test("merges llmFields from session metadata into request options", async () => {
+    const model = createGpt5Model("gpt-5.4")
+    const llmFields = { user: "user_1", session_id: "chat_1", custom: { trace: "abc" } }
+    const result = await Effect.runPromise(
+      LLMRequestPrep.prepare({
+        user: {
+          id: "msg_user-test",
+          sessionID,
+          role: "user",
+          time: { created: Date.now() },
+          agent: "test",
+          model: { providerID: model.providerID, modelID: model.id },
+        } as any,
+        sessionID,
+        sessionMetadata: { llmFields },
+        model,
+        agent: {
+          name: "test",
+          mode: "primary",
+          options: {},
+          permission: [],
+        } as any,
+        system: [],
+        messages: [{ role: "user", content: "Hello" }],
+        tools: {},
+        provider: { id: model.providerID, options: {} } as any,
+        auth: undefined,
+        plugin: {
+          trigger: (_name: string, _input: unknown, output: unknown) => Effect.succeed(output),
+          list: () => Effect.succeed([]),
+          init: () => Effect.void,
+        } as any,
+        flags: { outputTokenMax: 32_000, client: "test" } as any,
+        isWorkflow: false,
+      }).pipe(Effect.provideService(InstanceRef, instanceContext)),
+    )
+
+    expect(result.params.options.user).toBe("user_1")
+    expect(result.params.options.session_id).toBe("chat_1")
+    expect(result.params.options.custom).toEqual({ trace: "abc" })
+    expect(result.llmFields).toEqual(llmFields)
   })
 
   test("gpt-5.1 should have textVerbosity set to low", () => {

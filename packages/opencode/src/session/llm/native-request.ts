@@ -32,6 +32,7 @@ export type RequestInput = {
   readonly maxOutputTokens?: number
   readonly providerOptions?: LLMRequest["providerOptions"]
   readonly headers?: Record<string, string>
+  readonly http?: LLMRequest["http"]
 }
 
 const providerMetadata = (value: unknown): ProviderMetadata | undefined => {
@@ -190,6 +191,7 @@ export const request = (input: RequestInput) => {
     toolChoice: input.toolChoice,
     generation: generation(input),
     providerOptions: input.providerOptions,
+    http: input.http,
   })
 }
 

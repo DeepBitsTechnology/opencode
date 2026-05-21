@@ -41,6 +41,7 @@ type StreamInput = {
   readonly providerOptions?: Record<string, any>
   readonly headers: Record<string, string>
   readonly abort: AbortSignal
+  readonly llmFields?: Record<string, unknown>
 }
 
 export function status(input: Pick<StreamInput, "model" | "provider" | "auth">): RuntimeStatus {
@@ -99,6 +100,7 @@ export function stream(input: StreamInput): StreamResult {
     maxOutputTokens: input.maxOutputTokens,
     providerOptions: ProviderTransform.providerOptions(input.model, input.providerOptions ?? {}),
     headers: { ...providerHeaders(input.provider.options.headers), ...input.headers },
+    http: input.llmFields ? { body: input.llmFields } : undefined,
   })
   const stream = Stream.scoped(
     Stream.unwrap(

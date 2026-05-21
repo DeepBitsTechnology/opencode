@@ -231,6 +231,7 @@ const layer = Layer.effect(
           tools: {},
           model: mdl,
           sessionID: input.session.id,
+          sessionMetadata: input.session.metadata,
           retries: 2,
           messages: [{ role: "user", content: "Generate a title for this conversation:\n" }, ...msgs],
         })
@@ -1278,6 +1279,7 @@ const layer = Layer.effect(
               agent,
               permission: session.permission,
               sessionID,
+              sessionMetadata: session.metadata,
               parentSessionID: session.parentID,
               system,
               messages: [

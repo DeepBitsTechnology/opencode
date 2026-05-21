@@ -8,6 +8,7 @@ import { Agent } from "@/agent/agent"
 import { Session } from "@/session/session"
 import { Permission } from "@/permission"
 import { Plugin } from "@/plugin"
+import { asRecord } from "@/util/record"
 
 export const CODE_MODE_TOOL = "execute"
 
@@ -137,6 +138,7 @@ const invokeChildTool = Effect.fn("CodeMode.invokeChildTool")(function* (input: 
   args: Record<string, unknown>
   callID: string
   ctx: Tool.Context
+  mcpMeta?: Record<string, unknown>
 }) {
   yield* input.plugin.trigger(
     "tool.execute.before",
@@ -148,7 +150,11 @@ const invokeChildTool = Effect.fn("CodeMode.invokeChildTool")(function* (input: 
     // Deliberately mirrors McpCatalog.convertTool's transport call so the MCP service stays free of tool-loop concerns.
     return yield* Effect.promise(async () => {
       const raw = await input.entry.tool.client.callTool(
-        { name: input.entry.tool.def.name, arguments: input.args },
+        {
+          name: input.entry.tool.def.name,
+          arguments: input.args,
+          ...(input.mcpMeta ? { _meta: input.mcpMeta } : {}),
+        },
         CallToolResultSchema,
         {
           resetTimeoutOnProgress: true,
@@ -210,6 +216,7 @@ export const CodeModeTool = Tool.define(
         const mcpTools = Permission.visibleTools(yield* mcp.tools(), ruleset)
         const servers = Object.keys(yield* mcp.clients()).map(McpCatalog.sanitize)
         const catalog = [...groupByServer(mcpTools, servers).values()].flat()
+        const mcpMeta = asRecord(session.metadata?.mcpMeta)
 
         const calls: CallEntry[] = []
         const attachments: Attachment[] = []
@@ -226,6 +233,7 @@ export const CodeModeTool = Tool.define(
               args: (input ?? {}) as Record<string, unknown>,
               callID: `${ctx.callID ?? entry.key}/${childCalls}`,
               ctx,
+              mcpMeta,
             })
             return projectMcpResult(result, (attachment: Attachment) => void attachments.push(attachment))
           }).pipe(

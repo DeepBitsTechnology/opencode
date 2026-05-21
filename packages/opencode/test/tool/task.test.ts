@@ -584,6 +584,42 @@ describe("tool.task", () => {
     { config: { subagent_depth: 2 } },
   )
 
+  it.instance("execute clones parent session metadata onto created child sessions", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const { chat, assistant } = yield* seed()
+      const metadata = {
+        mcpMeta: { tenant: "acme", actor: "sheng@example.com" },
+        llmFields: { user: "user_1", session_id: "chat_1" },
+      }
+      yield* sessions.setMetadata({ sessionID: chat.id, metadata })
+
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      const result = yield* def.execute(
+        {
+          description: "inspect bug",
+          prompt: "look into the cache key path",
+          subagent_type: "general",
+        },
+        {
+          sessionID: chat.id,
+          messageID: assistant.id,
+          agent: "build",
+          abort: new AbortController().signal,
+          extra: { promptOps: stubOps() },
+          messages: [],
+          metadata: () => Effect.void,
+          ask: () => Effect.void,
+        },
+      )
+
+      const child = yield* sessions.get(result.metadata.sessionId)
+      expect(child.metadata).toEqual(metadata)
+      expect(child.metadata).not.toBe(metadata)
+    }),
+  )
+
   it.instance(
     "execute shapes child permissions for task, todowrite, and primary tools",
     () =>

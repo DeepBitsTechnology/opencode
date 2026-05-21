@@ -18,6 +18,7 @@ import { MessageV2 } from "./message-v2"
 import { Session } from "./session"
 import { SessionProcessor } from "./processor"
 import { PartID } from "./schema"
+import { asRecord } from "@/util/record"
 import { EffectBridge } from "@/effect/bridge"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
@@ -387,8 +388,9 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
 
   if (flags.experimentalCodeMode) return tools
 
+  const mcpMeta = asRecord(input.session.metadata?.mcpMeta)
   for (const [key, entry] of Object.entries(yield* mcp.tools())) {
-    const item = McpCatalog.convertTool(entry.def, entry.client, entry.timeout)
+    const item = McpCatalog.convertTool(entry.def, entry.client, entry.timeout, mcpMeta)
     const execute = item.execute
     if (!execute) continue
 

@@ -1002,3 +1002,4 @@ export const node = LayerNode.make({
 })
 
 export * as MCP from "."
+export { convertTool as _convertMcpTool } from "./catalog"

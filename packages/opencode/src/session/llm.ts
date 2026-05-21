@@ -29,6 +29,7 @@ import * as OtelTracer from "@effect/opentelemetry/Tracer"
 import { LLMAISDK } from "./llm/ai-sdk"
 import { LLMNativeRuntime } from "./llm/native-runtime"
 import { LLMRequestPrep } from "./llm/request"
+import type { Session } from "./session"
 
 export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
 
@@ -41,6 +42,7 @@ export type StreamInput = {
   permission?: PermissionV1.Ruleset
   system: string[]
   messages: ModelMessage[]
+  sessionMetadata?: Session.Info["metadata"]
   small?: boolean
   tools: Record<string, Tool>
   retries?: number
@@ -239,6 +241,7 @@ const live: Layer.Layer<
           providerOptions: prepared.params.options,
           headers: prepared.headers,
           abort: input.abort,
+          llmFields: prepared.llmFields,
         })
         if (native.type === "supported") {
           yield* Effect.logInfo("llm runtime selected", {
@@ -346,8 +349,8 @@ const live: Layer.Layer<
             functionId: "session.llm",
             tracer: telemetryTracer,
             metadata: {
-              userId: cfg.username ?? "unknown",
-              sessionId: input.sessionID,
+              userId: typeof prepared.llmFields?.user === "string" ? prepared.llmFields.user : (cfg.username ?? "unknown"),
+              sessionId: typeof prepared.llmFields?.session_id === "string" ? prepared.llmFields.session_id : input.sessionID,
             },
           },
         }),

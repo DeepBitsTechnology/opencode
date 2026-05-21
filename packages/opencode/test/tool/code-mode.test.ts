@@ -37,11 +37,25 @@ function mcpTool(
   }
 }
 
+/** Like mcpTool, but records the whole request params so tests can assert on _meta. */
+function capturingTool(name: string, seen: { _meta?: unknown }[]): MCP.McpTool {
+  return {
+    def: { name, description: name, inputSchema: { type: "object", properties: {} } } as MCPToolDef,
+    client: {
+      callTool: async (params: { _meta?: unknown }) => {
+        seen.push(params)
+        return { content: [{ type: "text", text: "ok" }] }
+      },
+    } as unknown as MCP.McpTool["client"],
+  }
+}
+
 function harness(input: {
   mcpTools: Record<string, MCP.McpTool>
   servers: string[]
   permission?: PermissionV1.Rule[]
   trigger?: Plugin.Interface["trigger"]
+  metadata?: Record<string, unknown>
 }) {
   return Layer.mergeAll(
     Layer.mock(Plugin.Service, {
@@ -54,7 +68,7 @@ function harness(input: {
       get: () => Effect.succeed({ name: "build", permission: input.permission ?? [] } as any),
     }),
     Layer.mock(Session.Service, {
-      get: () => Effect.succeed({ permission: [] } as any),
+      get: () => Effect.succeed({ permission: [], metadata: input.metadata } as any),
     }),
     Layer.mock(MCP.Service, {
       tools: () => Effect.succeed(input.mcpTools),
@@ -72,12 +86,13 @@ function build(
   servers?: string[],
   permission?: PermissionV1.Rule[],
   trigger?: Plugin.Interface["trigger"],
+  metadata?: Record<string, unknown>,
 ) {
   const names = serverNames(mcpTools, servers)
   return Effect.runPromise(
     CodeModeTool.pipe(
       Effect.flatMap(Tool.init),
-      Effect.provide(harness({ mcpTools, servers: names, permission, trigger })),
+      Effect.provide(harness({ mcpTools, servers: names, permission, trigger, metadata })),
     ),
   )
 }
@@ -288,6 +303,33 @@ describe("code mode execute", () => {
     expect(output.metadata.toolCalls).toEqual([
       { tool: "greeter.hello", status: "completed", input: { name: "world" } },
     ])
+  })
+
+  test("child calls carry session metadata mcpMeta as _meta on the MCP request", async () => {
+    const seen: { _meta?: unknown }[] = []
+    const mcpMeta = { tenant: "acme", actor: "sheng@example.com" }
+    const tool = await build(
+      { greeter_hello: capturingTool("hello", seen) },
+      undefined,
+      undefined,
+      undefined,
+      { mcpMeta },
+    )
+
+    await Effect.runPromise(tool.execute({ code: "return await tools.greeter.hello({ name: 'world' })" }, ctx))
+
+    expect(seen).toHaveLength(1)
+    expect(seen[0]!._meta).toEqual(mcpMeta)
+  })
+
+  test("child calls omit _meta when session metadata has no mcpMeta", async () => {
+    const seen: { _meta?: unknown }[] = []
+    const tool = await build({ greeter_hello: capturingTool("hello", seen) })
+
+    await Effect.runPromise(tool.execute({ code: "return await tools.greeter.hello({ name: 'world' })" }, ctx))
+
+    expect(seen).toHaveLength(1)
+    expect(seen[0]!._meta).toBeUndefined()
   })
 
   test("exposes structured content as native data and composes multiple calls", async () => {
