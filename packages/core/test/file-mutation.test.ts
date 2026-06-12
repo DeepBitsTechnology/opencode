@@ -171,6 +171,64 @@ describe("FileMutation", () => {
     ),
   )
 
+  it.live("rejects a prospective target when an ancestor becomes a symlink after resolution", () =>
+    withTmp((directory) =>
+      withTmp((outside) =>
+        Effect.gen(function* () {
+          if (process.platform === "win32") return
+
+          const target = yield* (yield* LocationMutation.Service).resolve({
+            path: path.join("linked", "blocked.txt"),
+          })
+          yield* Effect.promise(() => fs.symlink(outside, path.join(directory, "linked")))
+
+          expect(
+            yield* (yield* FileMutation.Service).write({ target, content: "blocked" }).pipe(Effect.flip),
+          ).toMatchObject({
+            _tag: "FileMutation.TargetChangedError",
+          })
+          expect(
+            yield* Effect.promise(() =>
+              fs.stat(path.join(outside, "blocked.txt")).then(
+                () => true,
+                () => false,
+              ),
+            ),
+          ).toBe(false)
+        }).pipe(provide(directory)),
+      ),
+    ),
+  )
+
+  it.live("rejects an existing target replaced by a symlink after resolution", () =>
+    withTmp((directory) =>
+      withTmp((outside) =>
+        Effect.gen(function* () {
+          if (process.platform === "win32") return
+
+          const targetPath = path.join(directory, "victim.txt")
+          const outsidePath = path.join(outside, "outside.txt")
+          yield* Effect.promise(async () => {
+            await fs.writeFile(targetPath, "before")
+            await fs.writeFile(outsidePath, "outside")
+          })
+          const target = yield* (yield* LocationMutation.Service).resolve({ path: "victim.txt" })
+          yield* Effect.promise(async () => {
+            await fs.rm(targetPath)
+            await fs.symlink(outsidePath, targetPath)
+          })
+
+          expect(
+            yield* (yield* FileMutation.Service).write({ target, content: "blocked" }).pipe(Effect.flip),
+          ).toMatchObject({
+            _tag: "FileMutation.TargetChangedError",
+          })
+          expect(yield* Effect.promise(() => fs.readFile(outsidePath, "utf8"))).toBe("outside")
+        }).pipe(provide(directory)),
+      ),
+    ),
+  )
+
   it.live("removes an explicitly resolved external target", () =>
     withTmp((directory) =>
       withTmp((outside) =>

@@ -1,6 +1,6 @@
 import { NodeFileSystem } from "@effect/platform-node"
 import { dirname, isAbsolute, join, relative, resolve as pathResolve, sep } from "path"
-import { realpathSync } from "fs"
+import { constants as fsConstants, realpathSync } from "fs"
 import * as NFS from "fs/promises"
 import { lookup } from "mime-types"
 import { Context, Effect, FileSystem, Layer, Schema } from "effect"
@@ -37,6 +37,13 @@ export namespace FSUtil {
     readonly writeJson: (path: string, data: unknown, mode?: number) => Effect.Effect<void, Error>
     readonly ensureDir: (path: string) => Effect.Effect<void, Error>
     readonly writeWithDirs: (path: string, content: string | Uint8Array, mode?: number) => Effect.Effect<void, Error>
+    /**
+     * Write while refusing to follow a symlink at the final path component
+     * (POSIX O_NOFOLLOW). Callers should pass an already-resolved canonical
+     * path so a last-moment symlink swap at the target cannot redirect the
+     * write outside the intended location. Windows falls back to writeWithDirs.
+     */
+    readonly writeNoFollow: (path: string, content: string | Uint8Array, mode?: number) => Effect.Effect<void, Error>
     readonly readDirectoryEntries: (path: string) => Effect.Effect<DirEntry[], Error>
     readonly resolve: (path: string) => Effect.Effect<string>
     readonly findUp: (target: string, start: string, stop?: string) => Effect.Effect<string[], Error>
@@ -144,6 +151,44 @@ export namespace FSUtil {
         if (mode) yield* fs.chmod(path, mode)
       })
 
+      const writeNoFollow = Effect.fn("FileSystem.writeNoFollow")(function* (
+        path: string,
+        content: string | Uint8Array,
+        mode?: number,
+      ) {
+        // O_NOFOLLOW is a POSIX concept. On Windows symlink semantics differ and
+        // the tool layer already re-checks the resolved path before writing, so
+        // fall back to the regular write there.
+        if (process.platform === "win32") {
+          yield* writeWithDirs(path, content, mode)
+          return
+        }
+
+        const flags = fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | fsConstants.O_NOFOLLOW
+        yield* Effect.tryPromise({
+          try: async () => {
+            const open = () => NFS.open(path, flags, mode ?? 0o666)
+            let handle: NFS.FileHandle
+            try {
+              handle = await open()
+            } catch (error: any) {
+              // Only a missing parent directory is recoverable; ELOOP (the final
+              // component is a symlink) and friends must fail closed.
+              if (error?.code !== "ENOENT") throw error
+              await NFS.mkdir(dirname(path), { recursive: true })
+              handle = await open()
+            }
+            try {
+              await handle.writeFile(content)
+              if (mode !== undefined) await handle.chmod(mode)
+            } finally {
+              await handle.close()
+            }
+          },
+          catch: (cause) => new FileSystemError({ method: "writeNoFollow", cause }),
+        })
+      })
+
       const glob = Effect.fn("FileSystem.glob")(function* (pattern: string, options?: Glob.Options) {
         return yield* Effect.tryPromise({
           try: () => Glob.scan(pattern, options),
@@ -209,6 +254,7 @@ export namespace FSUtil {
         writeJson,
         ensureDir,
         writeWithDirs,
+        writeNoFollow,
         findUp,
         up,
         globUp,
@@ -253,6 +299,40 @@ export namespace FSUtil {
       throw e
     }
   }
+
+  /**
+   * Resolve the canonical (symlink-free) location of `target`. When `target`
+   * itself cannot be resolved, walk up to the nearest resolvable ancestor,
+   * canonicalize that, and re-append the remaining tail. `realPath` must yield
+   * the resolved path for an existing entry or `undefined` for anything that
+   * cannot be resolved (missing, symlink loop, permission denied, ...); callers
+   * typically catch every error to `undefined` so resolution never throws on a
+   * write hot path. `normalize` is applied to every returned path so the result
+   * stays comparable with the caller's other normalized paths.
+   *
+   * Shared by the tool layer (sync inputs, async fs/promises realpath) and the
+   * core FileMutation layer (Effect FileSystem realPath) so the security-
+   * critical ancestor walk has a single implementation.
+   */
+  export const resolveCanonical = <E, R>(
+    target: string,
+    realPath: (path: string) => Effect.Effect<string | undefined, E, R>,
+    normalize: (path: string) => string = (p) => p,
+  ): Effect.Effect<string, E, R> =>
+    Effect.gen(function* () {
+      const existing = yield* realPath(target)
+      if (existing !== undefined) return normalize(existing)
+
+      let anchor = dirname(target)
+      while (true) {
+        const canonical = yield* realPath(anchor)
+        if (canonical !== undefined) return normalize(pathResolve(canonical, relative(anchor, target)))
+
+        const parent = dirname(anchor)
+        if (parent === anchor) return normalize(target)
+        anchor = parent
+      }
+    })
 
   export function windowsPath(p: string): string {
     if (process.platform !== "win32") return p

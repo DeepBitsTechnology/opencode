@@ -247,9 +247,11 @@ export const ReadTool = Tool.define<
         ),
       )
 
+      const bypassExternalDirectory = Boolean(ctx.extra?.["bypassCwdCheck"])
+      const kind = stat?.type === "Directory" ? "directory" : "file"
       yield* assertExternalDirectoryEffect(ctx, filepath, {
-        bypass: Boolean(ctx.extra?.["bypassCwdCheck"]),
-        kind: stat?.type === "Directory" ? "directory" : "file",
+        bypass: bypassExternalDirectory,
+        kind,
       })
 
       yield* ctx.ask({

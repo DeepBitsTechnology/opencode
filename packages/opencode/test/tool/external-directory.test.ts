@@ -1,3 +1,4 @@
+import fs from "fs/promises"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { describe, expect } from "bun:test"
@@ -5,7 +6,11 @@ import path from "path"
 import { Effect } from "effect"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import type { Tool } from "@/tool/tool"
-import { assertExternalDirectoryEffect } from "../../src/tool/external-directory"
+import {
+  assertAuthorizedPathUnchangedEffect,
+  assertExternalDirectoryEffect,
+  authorizeExternalDirectoryEffect,
+} from "../../src/tool/external-directory"
 import { Filesystem } from "@/util/filesystem"
 import { TestInstance, tmpdirScoped } from "../fixture/fixture"
 import type { Permission } from "../../src/permission"
@@ -102,6 +107,109 @@ describe("tool.assertExternalDirectory", () => {
       yield* assertExternalDirectoryEffect(ctx, "/tmp/outside/file.txt", { bypass: true })
 
       expect(requests.length).toBe(0)
+    }),
+  )
+
+  it.instance("asks for the canonical external directory through a symlinked ancestor", () =>
+    Effect.gen(function* () {
+      if (process.platform === "win32") return
+
+      const test = yield* TestInstance
+      const outside = yield* tmpdirScoped()
+      const { requests, ctx } = makeCtx()
+      yield* Effect.promise(() => fs.symlink(outside, path.join(test.directory, "linked")))
+
+      const authorized = yield* authorizeExternalDirectoryEffect(ctx, path.join(test.directory, "linked", "new.txt"))
+
+      expect(authorized?.external).toBe(true)
+      expect(authorized?.canonical).toBe(path.join(outside, "new.txt"))
+      expect(requests).toHaveLength(1)
+      expect(requests[0]?.permission).toBe("external_directory")
+      expect(requests[0]?.patterns).toEqual([glob(path.join(outside, "*"))])
+    }),
+  )
+
+  it.instance("rejects a path that changes after authorization", () =>
+    Effect.gen(function* () {
+      if (process.platform === "win32") return
+
+      const test = yield* TestInstance
+      const outside = yield* tmpdirScoped()
+      const { ctx } = makeCtx()
+      const target = path.join(test.directory, "pending", "new.txt")
+
+      const authorized = yield* authorizeExternalDirectoryEffect(ctx, target)
+      yield* Effect.promise(() => fs.symlink(outside, path.join(test.directory, "pending")))
+
+      expect(yield* assertAuthorizedPathUnchangedEffect(authorized).pipe(Effect.flip)).toBeInstanceOf(Error)
+    }),
+  )
+
+  it.instance("does not crash when an ancestor is a symlink loop", () =>
+    Effect.gen(function* () {
+      if (process.platform === "win32") return
+
+      const test = yield* TestInstance
+      const { requests, ctx } = makeCtx()
+      // a -> b -> a is an unresolvable cycle; realpath throws ELOOP.
+      const a = path.join(test.directory, "loop-a")
+      const b = path.join(test.directory, "loop-b")
+      yield* Effect.promise(async () => {
+        await fs.symlink(b, a)
+        await fs.symlink(a, b)
+      })
+
+      // Resolution must fail gracefully (treat as unresolvable) rather than
+      // throwing a defect that crashes the tool.
+      const authorized = yield* authorizeExternalDirectoryEffect(ctx, path.join(a, "file.txt"))
+      expect(authorized).toBeDefined()
+      yield* assertAuthorizedPathUnchangedEffect(authorized)
+      expect(requests.length).toBe(0)
+    }),
+  )
+
+  it.instance("resolves the canonical path even when bypassed", () =>
+    Effect.gen(function* () {
+      if (process.platform === "win32") return
+
+      const test = yield* TestInstance
+      const outside = yield* tmpdirScoped()
+      const { requests, ctx } = makeCtx()
+      yield* Effect.promise(() => fs.symlink(outside, path.join(test.directory, "linked")))
+
+      const authorized = yield* authorizeExternalDirectoryEffect(ctx, path.join(test.directory, "linked", "new.txt"), {
+        bypass: true,
+      })
+
+      // Bypass skips the permission prompt but must still record the resolved
+      // canonical so a later unchanged-check compares against the real path.
+      expect(requests.length).toBe(0)
+      expect(authorized?.external).toBe(false)
+      expect(authorized?.canonical).toBe(path.join(outside, "new.txt"))
+      yield* assertAuthorizedPathUnchangedEffect(authorized)
+    }),
+  )
+
+  it.instance("asks once when requested and canonical share an external directory", () =>
+    Effect.gen(function* () {
+      if (process.platform === "win32") return
+
+      const outside = yield* tmpdirScoped()
+      const { requests, ctx } = makeCtx()
+      const realTarget = path.join(outside, "real.txt")
+      const linkTarget = path.join(outside, "link.txt")
+      yield* Effect.promise(async () => {
+        await fs.writeFile(realTarget, "x")
+        await fs.symlink(realTarget, linkTarget)
+      })
+
+      // Both the requested symlink and its canonical target live in the same
+      // external directory, so the user should only be prompted once.
+      const authorized = yield* authorizeExternalDirectoryEffect(ctx, linkTarget)
+
+      expect(authorized?.external).toBe(true)
+      expect(requests).toHaveLength(1)
+      expect(requests[0]?.patterns).toEqual([glob(path.join(outside, "*"))])
     }),
   )
 

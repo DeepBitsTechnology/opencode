@@ -15,7 +15,7 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { Format } from "../format"
 import { InstanceState } from "@/effect/instance-state"
 import { Snapshot } from "@/snapshot"
-import { assertExternalDirectoryEffect } from "./external-directory"
+import { assertAuthorizedPathUnchangedEffect, authorizeExternalDirectoryEffect, writeAuthorized } from "./external-directory"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import * as Bom from "@/util/bom"
 
@@ -80,13 +80,14 @@ export const EditTool = Tool.define(
           const filePath = path.isAbsolute(params.filePath)
             ? params.filePath
             : path.join(instance.directory, params.filePath)
-          yield* assertExternalDirectoryEffect(ctx, filePath)
+          const authorized = yield* authorizeExternalDirectoryEffect(ctx, filePath)
 
           let diff = ""
           let contentOld = ""
           let contentNew = ""
           yield* lock(filePath).withPermits(1)(
             Effect.gen(function* () {
+              yield* assertAuthorizedPathUnchangedEffect(authorized)
               if (params.oldString === "") {
                 const existed = yield* afs.existsSafe(filePath)
                 if (existed) {
@@ -108,8 +109,10 @@ export const EditTool = Tool.define(
                     diff,
                   },
                 })
-                yield* afs.writeWithDirs(filePath, Bom.join(contentNew, desiredBom))
+                yield* writeAuthorized(afs, authorized, filePath, Bom.join(contentNew, desiredBom))
+                yield* assertAuthorizedPathUnchangedEffect(authorized)
                 if (yield* format.file(filePath)) {
+                  yield* assertAuthorizedPathUnchangedEffect(authorized)
                   contentNew = yield* Bom.syncFile(afs, filePath, desiredBom)
                 }
                 yield* events.publish(FileSystem.Event.Edited, { file: filePath })
@@ -152,8 +155,10 @@ export const EditTool = Tool.define(
                 },
               })
 
-              yield* afs.writeWithDirs(filePath, Bom.join(contentNew, desiredBom))
+              yield* writeAuthorized(afs, authorized, filePath, Bom.join(contentNew, desiredBom))
+              yield* assertAuthorizedPathUnchangedEffect(authorized)
               if (yield* format.file(filePath)) {
+                yield* assertAuthorizedPathUnchangedEffect(authorized)
                 contentNew = yield* Bom.syncFile(afs, filePath, desiredBom)
               }
               yield* events.publish(FileSystem.Event.Edited, { file: filePath })

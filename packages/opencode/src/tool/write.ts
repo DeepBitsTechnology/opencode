@@ -12,7 +12,7 @@ import { Format } from "../format"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { InstanceState } from "@/effect/instance-state"
 import { trimDiff } from "./edit"
-import { assertExternalDirectoryEffect } from "./external-directory"
+import { assertAuthorizedPathUnchangedEffect, authorizeExternalDirectoryEffect, writeAuthorized } from "./external-directory"
 import * as Bom from "@/util/bom"
 
 const MAX_PROJECT_DIAGNOSTICS_FILES = 5
@@ -41,8 +41,9 @@ export const WriteTool = Tool.define(
           const filepath = path.isAbsolute(params.filePath)
             ? params.filePath
             : path.join(instance.directory, params.filePath)
-          yield* assertExternalDirectoryEffect(ctx, filepath)
+          const authorized = yield* authorizeExternalDirectoryEffect(ctx, filepath)
 
+          yield* assertAuthorizedPathUnchangedEffect(authorized)
           const exists = yield* fs.existsSafe(filepath)
           const source = exists ? yield* Bom.readFile(fs, filepath) : { bom: false, text: "" }
           const next = Bom.split(params.content)
@@ -61,8 +62,10 @@ export const WriteTool = Tool.define(
             },
           })
 
-          yield* fs.writeWithDirs(filepath, Bom.join(contentNew, desiredBom))
+          yield* writeAuthorized(fs, authorized, filepath, Bom.join(contentNew, desiredBom))
+          yield* assertAuthorizedPathUnchangedEffect(authorized)
           if (yield* format.file(filepath)) {
+            yield* assertAuthorizedPathUnchangedEffect(authorized)
             yield* Bom.syncFile(fs, filepath, desiredBom)
           }
           yield* events.publish(FileSystem.Event.Edited, { file: filepath })

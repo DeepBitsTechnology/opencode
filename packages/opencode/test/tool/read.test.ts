@@ -257,6 +257,37 @@ describe("tool.read external_directory permission", () => {
       expect(ext).toBeUndefined()
     }),
   )
+
+  it.live("denies project symlink to external target when external_directory is denied", () =>
+    Effect.gen(function* () {
+      const fs = yield* FSUtil.Service
+      const outer = yield* tmpdirScoped()
+      const dir = yield* tmpdirScoped({ git: true })
+      const target = path.join(outer, "secret.txt")
+      const link = path.join(dir, "link.txt")
+      yield* put(target, "secret data")
+      yield* fs.symlink(target, link)
+
+      const { items } = asks()
+      const next = {
+        ...ctx,
+        ask: (req: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">) =>
+          Effect.sync(() => {
+            items.push(req)
+            if (req.permission !== "external_directory") return
+            throw new PermissionV1.DeniedError({
+              ruleset: [{ permission: "external_directory", pattern: "*", action: "deny" }],
+            })
+          }),
+      }
+
+      const err = yield* fail(dir, { filePath: link }, next)
+      const ext = items.find((item) => item.permission === "external_directory")
+      expect(err).toBeInstanceOf(PermissionV1.DeniedError)
+      expect(ext).toBeDefined()
+      expect(ext!.patterns).toContain(glob(path.join(outer, "*")))
+    }),
+  )
 })
 
 describe("tool.read env file permissions", () => {

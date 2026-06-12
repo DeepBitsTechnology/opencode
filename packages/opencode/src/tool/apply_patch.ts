@@ -6,7 +6,13 @@ import { Watcher } from "@opencode-ai/core/filesystem/watcher"
 import { InstanceState } from "@/effect/instance-state"
 import { Patch } from "../patch"
 import { createTwoFilesPatch, diffLines } from "diff"
-import { assertExternalDirectoryEffect } from "./external-directory"
+import {
+  assertAuthorizedPathUnchangedEffect,
+  authorizeExternalDirectoryEffect,
+  removeAuthorized,
+  writeAuthorized,
+  type AuthorizedPath,
+} from "./external-directory"
 import { trimDiff } from "./edit"
 import { LSP } from "@/lsp/lsp"
 import { FSUtil } from "@opencode-ai/core/fs-util"
@@ -65,13 +71,15 @@ export const ApplyPatchTool = Tool.define(
         additions: number
         deletions: number
         bom: boolean
+        authority?: AuthorizedPath
+        moveAuthority?: AuthorizedPath
       }> = []
 
       let totalDiff = ""
 
       for (const hunk of hunks) {
         const filePath = path.resolve(instance.directory, hunk.path)
-        yield* assertExternalDirectoryEffect(ctx, filePath)
+        const authority = yield* authorizeExternalDirectoryEffect(ctx, filePath)
 
         switch (hunk.type) {
           case "add": {
@@ -97,6 +105,7 @@ export const ApplyPatchTool = Tool.define(
               additions,
               deletions,
               bom: next.bom,
+              authority,
             })
 
             totalDiff += diff + "\n"
@@ -105,6 +114,7 @@ export const ApplyPatchTool = Tool.define(
 
           case "update": {
             // Check if file exists for update
+            yield* assertAuthorizedPathUnchangedEffect(authority)
             const stats = yield* afs.stat(filePath).pipe(Effect.catch(() => Effect.succeed(undefined)))
             if (!stats || stats.type === "Directory") {
               return yield* Effect.fail(
@@ -140,7 +150,7 @@ export const ApplyPatchTool = Tool.define(
             }
 
             const movePath = hunk.move_path ? path.resolve(instance.directory, hunk.move_path) : undefined
-            yield* assertExternalDirectoryEffect(ctx, movePath)
+            const moveAuthority = yield* authorizeExternalDirectoryEffect(ctx, movePath)
 
             fileChanges.push({
               filePath,
@@ -152,6 +162,8 @@ export const ApplyPatchTool = Tool.define(
               additions,
               deletions,
               bom,
+              authority,
+              moveAuthority,
             })
 
             totalDiff += diff + "\n"
@@ -159,6 +171,7 @@ export const ApplyPatchTool = Tool.define(
           }
 
           case "delete": {
+            yield* assertAuthorizedPathUnchangedEffect(authority)
             const source = yield* Bom.readFile(afs, filePath).pipe(
               Effect.catch((error) =>
                 Effect.fail(
@@ -182,6 +195,7 @@ export const ApplyPatchTool = Tool.define(
               additions: 0,
               deletions,
               bom: source.bom,
+              authority,
             })
 
             totalDiff += deleteDiff + "\n"
@@ -223,12 +237,12 @@ export const ApplyPatchTool = Tool.define(
           case "add":
             // Create parent directories (recursive: true is safe on existing/root dirs)
 
-            yield* afs.writeWithDirs(change.filePath, Bom.join(change.newContent, change.bom))
+            yield* writeAuthorized(afs, change.authority, change.filePath, Bom.join(change.newContent, change.bom))
             updates.push({ file: change.filePath, event: "add" })
             break
 
           case "update":
-            yield* afs.writeWithDirs(change.filePath, Bom.join(change.newContent, change.bom))
+            yield* writeAuthorized(afs, change.authority, change.filePath, Bom.join(change.newContent, change.bom))
             updates.push({ file: change.filePath, event: "change" })
             break
 
@@ -236,21 +250,23 @@ export const ApplyPatchTool = Tool.define(
             if (change.movePath) {
               // Create parent directories (recursive: true is safe on existing/root dirs)
 
-              yield* afs.writeWithDirs(change.movePath!, Bom.join(change.newContent, change.bom))
-              yield* afs.remove(change.filePath)
+              yield* writeAuthorized(afs, change.moveAuthority, change.movePath, Bom.join(change.newContent, change.bom))
+              yield* removeAuthorized(afs, change.authority, change.filePath)
               updates.push({ file: change.filePath, event: "unlink" })
               updates.push({ file: change.movePath, event: "add" })
             }
             break
 
           case "delete":
-            yield* afs.remove(change.filePath)
+            yield* removeAuthorized(afs, change.authority, change.filePath)
             updates.push({ file: change.filePath, event: "unlink" })
             break
         }
 
         if (edited) {
+          yield* assertAuthorizedPathUnchangedEffect(change.type === "move" ? change.moveAuthority : change.authority)
           if (yield* format.file(edited)) {
+            yield* assertAuthorizedPathUnchangedEffect(change.type === "move" ? change.moveAuthority : change.authority)
             yield* Bom.syncFile(afs, edited, change.bom)
           }
           yield* events.publish(FileSystem.Event.Edited, { file: edited })
