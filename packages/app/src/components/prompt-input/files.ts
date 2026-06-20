@@ -4,7 +4,6 @@ export { ACCEPTED_FILE_TYPES }
 
 type AttachmentPicker = (
   options: {
-    defaultPath?: string
     multiple?: boolean
     accept?: string[]
   },
@@ -13,7 +12,6 @@ type AttachmentPicker = (
 
 export function pickAttachmentFiles(input: {
   picker?: AttachmentPicker
-  directory: () => string
   fallback: () => void
   onFile: (file: File) => Promise<unknown>
   onError: (error: unknown) => void
@@ -25,7 +23,6 @@ export function pickAttachmentFiles(input: {
   void input
     .picker(
       {
-        defaultPath: input.directory(),
         multiple: true,
         accept: ACCEPTED_FILE_TYPES,
       },

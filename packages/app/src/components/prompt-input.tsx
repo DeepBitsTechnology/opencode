@@ -421,7 +421,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const pick = () => {
     pickAttachmentFiles({
       picker: platform.openAttachmentPickerDialog,
-      directory: () => sdk().directory,
       fallback: () => fileInputRef?.click(),
       onFile: addAttachment,
       onError: (error) =>
