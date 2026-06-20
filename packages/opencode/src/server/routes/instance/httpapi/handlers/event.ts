@@ -2,7 +2,7 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { InstanceState } from "@/effect/instance-state"
 import { GlobalBus } from "@/bus/global"
 import { EventV2 } from "@opencode-ai/core/event"
-import { Effect, Queue } from "effect"
+import { Clock, Deferred, Effect, Queue, Ref } from "effect"
 import * as Stream from "effect/Stream"
 import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -28,9 +28,40 @@ function eventResponse(events: EventV2.Interface) {
     const workspaceID = yield* InstanceState.workspaceID
     // Listener registration is eager, so events published after this point cannot
     // be lost while the HTTP body fiber is starting or emitting server.connected.
-    const queue = yield* Queue.unbounded<EventV2.Payload>()
+    // Sliding (drop-oldest) caps memory if a consumer stalls: the producer below is
+    // a fire-and-forget bus callback that must never backpressure the event bus, so
+    // it cannot suspend on a full queue. The watchdog is the real cleanup; this is a
+    // backstop bounding worst-case growth during the detection window. Dropped events
+    // for sync-tracked aggregates are recoverable via /sync after the client reconnects.
+    const queue = yield* Queue.sliding<EventV2.Payload>(10_000)
     const unsubscribe = yield* events.listen((event) => Effect.sync(() => Queue.offerUnsafe(queue, event)))
     yield* Effect.addFinalizer(() => unsubscribe)
+
+    // Zombie-consumer detection. A client that stops reading without closing the
+    // socket (CLOSE_WAIT / full TCP send buffer) leaves the Effect stream suspended
+    // on write backpressure forever — no socket error is ever raised, so the body
+    // fiber never fails and the finalizer above never runs. The heartbeat below
+    // emits every 10s, so on a healthy connection lastEmit refreshes at least that
+    // often; once the sink stops draining, lastEmit goes stale. If nothing has been
+    // written for IDLE_TIMEOUT_MS we interrupt the body, which closes the scope and
+    // runs the finalizer.
+    const IDLE_TIMEOUT_MS = 30_000
+    const lastEmit = yield* Ref.make(yield* Clock.currentTimeMillis)
+    const interrupt = yield* Deferred.make<void>()
+    yield* Effect.forkScoped(
+      Effect.gen(function* () {
+        while (true) {
+          yield* Effect.sleep("5 seconds")
+          const now = yield* Clock.currentTimeMillis
+          const last = yield* Ref.get(lastEmit)
+          if (now - last > IDLE_TIMEOUT_MS) {
+            yield* Effect.logInfo("event consumer stalled, disconnecting")
+            yield* Deferred.succeed(interrupt, void 0)
+            return
+          }
+        }
+      }),
+    )
     const stream = Stream.fromQueue(queue).pipe(
       Stream.filter(
         (event) =>
@@ -69,6 +100,11 @@ function eventResponse(events: EventV2.Interface) {
     return HttpServerResponse.stream(
       Stream.make({ id: eventID(), type: "server.connected", properties: {} }).pipe(
         Stream.concat(output.pipe(Stream.merge(heartbeat, { haltStrategy: "left" }))),
+        // Record progress on every element the sink actually pulls (events and
+        // heartbeats). Streams are pull-based, so this stops refreshing the instant
+        // the socket write blocks — which is exactly what the watchdog detects.
+        Stream.tap(() => Effect.flatMap(Clock.currentTimeMillis, (now) => Ref.set(lastEmit, now))),
+        Stream.interruptWhen(Deferred.await(interrupt)),
         Stream.map(eventData),
         Stream.pipeThroughChannel(Sse.encode()),
         Stream.encodeText,
