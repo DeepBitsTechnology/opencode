@@ -91,6 +91,29 @@ describe("RequestExecutor", () => {
     ),
   )
 
+  it.effect("classifies input-too-long responses as context overflow", () =>
+    Effect.gen(function* () {
+      const executor = yield* RequestExecutor.Service
+      const error = yield* executor.execute(request).pipe(Effect.flip)
+
+      expectLLMError(error)
+      expect(error.reason).toMatchObject({ _tag: "InvalidRequest", classification: "context-overflow" })
+    }).pipe(
+      Effect.provide(
+        responsesLayer([
+          new Response(
+            JSON.stringify({
+              code: 400,
+              message: "Input too long: 265676 input tokens, limit is 262144 for this model",
+              metadata: { error_type: "invalid_request" },
+            }),
+            { status: 400 },
+          ),
+        ]),
+      ),
+    ),
+  )
+
   it.effect("does not classify generic HTTP 413 payload errors as context overflow", () =>
     Effect.gen(function* () {
       const executor = yield* RequestExecutor.Service

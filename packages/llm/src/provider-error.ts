@@ -4,6 +4,7 @@ import { LLMError, ProviderErrorEvent } from "./schema"
 const patterns = [
   /prompt is too long/i,
   /request_too_large/i,
+  /input too long: [\d,]+ input tokens, limit is [\d,]+/i,
   /input is too long for requested model/i,
   /exceeds the context window/i,
   /exceeds (?:the )?(?:model'?s )?maximum context length(?: of [\d,]+ tokens?|\s*\([\d,]+\))/i,

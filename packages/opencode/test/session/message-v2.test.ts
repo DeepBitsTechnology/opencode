@@ -1446,6 +1446,7 @@ describe("session.message-v2.fromError", () => {
   test("detects context overflow from APICallError provider messages", () => {
     const cases = [
       "prompt is too long: 213462 tokens > 200000 maximum",
+      "Input too long: 265676 input tokens, limit is 262144 for this model",
       "Your input exceeds the context window of this model",
       "The input token count (1196265) exceeds the maximum number of tokens allowed (1048575)",
       "tokens in request more than max tokens allowed",
