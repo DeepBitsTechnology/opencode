@@ -484,6 +484,50 @@
         ]
       }
     },
+    "/global/session/status": {
+      "get": {
+        "tags": ["global"],
+        "operationId": "global.sessionStatus",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Busy sessions grouped by directory",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "$ref": "#/components/schemas/SessionStatus"
+                    }
+                  },
+                  "description": "Busy sessions grouped by directory"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Retrieve every non-idle session across all loaded instances, keyed by directory. Instances that are not currently loaded are not reported.",
+        "summary": "Get session status across all directories",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.global.sessionStatus({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/global/upgrade": {
       "post": {
         "tags": ["global"],
@@ -21535,6 +21579,9 @@
                 "type": "boolean"
               },
               "batch_tool": {
+                "type": "boolean"
+              },
+              "small_model_enabled": {
                 "type": "boolean"
               },
               "openTelemetry": {

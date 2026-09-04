@@ -3,6 +3,7 @@ import { GlobalBus, type GlobalEvent as GlobalBusEvent } from "@/bus/global"
 import { EffectBridge } from "@/effect/bridge"
 import { EventV2 } from "@opencode-ai/core/event"
 import { Installation } from "@/installation"
+import { SessionStatus } from "@/session/status"
 import { disposeAllInstancesAndEmitGlobalDisposed } from "@/server/global-lifecycle"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { Effect, Queue } from "effect"
@@ -61,6 +62,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
   Effect.gen(function* () {
     const config = yield* Config.Service
     const installation = yield* Installation.Service
+    const sessionStatusSvc = yield* SessionStatus.Service
     const bridge = yield* EffectBridge.make()
 
     const health = Effect.fn("GlobalHttpApi.health")(function* () {
@@ -69,6 +71,11 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
 
     const event = Effect.fn("GlobalHttpApi.event")(function* () {
       return yield* eventResponse()
+    })
+
+    const sessionStatus = Effect.fn("GlobalHttpApi.sessionStatus")(function* () {
+      const all = yield* sessionStatusSvc.listAll()
+      return Object.fromEntries(all.entries().map(([dir, statuses]) => [dir, Object.fromEntries(statuses)]))
     })
 
     const configGet = Effect.fn("GlobalHttpApi.configGet")(function* () {
@@ -122,5 +129,6 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       .handle("configUpdate", configUpdate)
       .handle("dispose", dispose)
       .handle("upgrade", upgrade)
+      .handle("sessionStatus", sessionStatus)
   }),
 )

@@ -10,6 +10,7 @@ import { Auth } from "../../src/auth"
 import { Config } from "../../src/config/config"
 import { Installation } from "../../src/installation"
 import { ServerAuth } from "../../src/server/auth"
+import { SessionStatus } from "../../src/session/status"
 import { RootHttpApi } from "../../src/server/routes/instance/httpapi/api"
 import { controlHandlers } from "../../src/server/routes/instance/httpapi/handlers/control"
 import { controlPlaneHandlers } from "../../src/server/routes/instance/httpapi/handlers/control-plane"
@@ -42,6 +43,11 @@ const apiLayer = HttpRouter.serve(
   Layer.provide(
     Layer.mock(MoveSession.Service)({
       moveSession: (value) => Ref.set(called, value),
+    }),
+  ),
+  Layer.provide(
+    Layer.mock(SessionStatus.Service)({
+      listAll: () => Effect.succeed(new Map([["/tmp/proj", new Map([["ses_1" as never, { type: "busy" as const }]])]])),
     }),
   ),
   Layer.provide(ServerAuth.Config.configLayer({ password: Option.none(), username: "opencode" })),

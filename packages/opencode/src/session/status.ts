@@ -13,6 +13,8 @@ export const Event = SessionStatusEvent
 export interface Interface {
   readonly get: (sessionID: SessionID) => Effect.Effect<Info>
   readonly list: () => Effect.Effect<Map<SessionID, Info>>
+  /** Every non-idle session across all loaded instances, keyed by directory. */
+  readonly listAll: () => Effect.Effect<Map<string, Map<SessionID, Info>>>
   readonly set: (sessionID: SessionID, status: Info) => Effect.Effect<void>
 }
 
@@ -36,6 +38,13 @@ const layer = Layer.effect(
       return new Map(yield* InstanceState.get(state))
     })
 
+    const listAll = Effect.fn("SessionStatus.listAll")(function* () {
+      const entries = yield* InstanceState.entries(state)
+      return new Map(
+        entries.filter(([, statuses]) => statuses.size > 0).map(([dir, statuses]) => [dir, new Map(statuses)]),
+      )
+    })
+
     const set = Effect.fn("SessionStatus.set")(function* (sessionID: SessionID, status: Info) {
       const data = yield* InstanceState.get(state)
       yield* events.publish(Event.Status, { sessionID, status })
@@ -47,7 +56,7 @@ const layer = Layer.effect(
       data.set(sessionID, status)
     })
 
-    return Service.of({ get, list, set })
+    return Service.of({ get, list, listAll, set })
   }),
 )
 

@@ -2024,6 +2024,7 @@ export type Config = {
   experimental?: {
     disable_paste_summary?: boolean
     batch_tool?: boolean
+    small_model_enabled?: boolean
     openTelemetry?: boolean
     primary_tools?: Array<string>
     continue_loop_on_deny?: boolean
@@ -7353,6 +7354,35 @@ export type GlobalDisposeResponses = {
 }
 
 export type GlobalDisposeResponse = GlobalDisposeResponses[keyof GlobalDisposeResponses]
+
+export type GlobalSessionStatusData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/session/status"
+}
+
+export type GlobalSessionStatusErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalSessionStatusError = GlobalSessionStatusErrors[keyof GlobalSessionStatusErrors]
+
+export type GlobalSessionStatusResponses = {
+  /**
+   * Busy sessions grouped by directory
+   */
+  200: {
+    [key: string]: {
+      [key: string]: SessionStatus
+    }
+  }
+}
+
+export type GlobalSessionStatusResponse = GlobalSessionStatusResponses[keyof GlobalSessionStatusResponses]
 
 export type GlobalUpgradeData = {
   body?: {

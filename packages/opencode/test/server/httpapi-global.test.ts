@@ -8,6 +8,7 @@ import { Config } from "../../src/config/config"
 import { Installation } from "../../src/installation"
 import { MoveSession } from "@opencode-ai/core/control-plane/move-session"
 import { ServerAuth } from "../../src/server/auth"
+import { SessionStatus } from "../../src/session/status"
 import { RootHttpApi } from "../../src/server/routes/instance/httpapi/api"
 import { GlobalPaths } from "../../src/server/routes/instance/httpapi/groups/global"
 import { controlHandlers } from "../../src/server/routes/instance/httpapi/handlers/control"
@@ -38,11 +39,25 @@ const apiLayer = HttpRouter.serve(
       upgrade: () => Effect.void,
     }),
   ),
+  Layer.provide(
+    Layer.mock(SessionStatus.Service)({
+      listAll: () => Effect.succeed(new Map([["/tmp/proj", new Map([["ses_1" as never, { type: "busy" as const }]])]])),
+    }),
+  ),
   Layer.provide(ServerAuth.Config.configLayer({ password: Option.none(), username: "opencode" })),
 )
 const it = testEffect(apiLayer)
 
 describe("global HttpApi", () => {
+  it.live("reports busy sessions across every directory", () =>
+    Effect.gen(function* () {
+      const response = yield* HttpClientRequest.get(GlobalPaths.sessionStatus).pipe(HttpClient.execute)
+
+      expect(response.status).toBe(200)
+      expect(yield* response.json).toEqual({ "/tmp/proj": { ses_1: { type: "busy" } } })
+    }),
+  )
+
   it.live("upgrades to the requested version", () =>
     Effect.gen(function* () {
       const response = yield* HttpClientRequest.post(GlobalPaths.upgrade).pipe(

@@ -7,6 +7,7 @@ import "@/server/event"
 import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import semver from "semver"
+import { SessionStatusEvent } from "@opencode-ai/schema/session-status-event"
 import { described } from "./metadata"
 
 const GlobalHealth = Schema.Struct({
@@ -71,7 +72,12 @@ export const GlobalPaths = {
   config: "/global/config",
   dispose: "/global/dispose",
   upgrade: "/global/upgrade",
+  sessionStatus: "/global/session/status",
 } as const
+
+// directory -> sessionID -> status. Only non-idle sessions are tracked, so an
+// empty object means nothing is running anywhere.
+const GlobalSessionStatus = Schema.Record(Schema.String, Schema.Record(Schema.String, SessionStatusEvent.Info))
 
 export const GlobalApi = HttpApi.make("global").add(
   HttpApiGroup.make("global")
@@ -121,6 +127,16 @@ export const GlobalApi = HttpApi.make("global").add(
           identifier: "global.dispose",
           summary: "Dispose instance",
           description: "Clean up and dispose all OpenCode instances, releasing all resources.",
+        }),
+      ),
+      HttpApiEndpoint.get("sessionStatus", GlobalPaths.sessionStatus, {
+        success: described(GlobalSessionStatus, "Busy sessions grouped by directory"),
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.sessionStatus",
+          summary: "Get session status across all directories",
+          description:
+            "Retrieve every non-idle session across all loaded instances, keyed by directory. Instances that are not currently loaded are not reported.",
         }),
       ),
       HttpApiEndpoint.post("upgrade", GlobalPaths.upgrade, {

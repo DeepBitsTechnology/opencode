@@ -86,6 +86,8 @@ import type {
   GlobalEventResponses,
   GlobalHealthErrors,
   GlobalHealthResponses,
+  GlobalSessionStatusErrors,
+  GlobalSessionStatusResponses,
   GlobalUpgradeErrors,
   GlobalUpgradeResponses,
   InstanceDisposeErrors,
@@ -1348,6 +1350,18 @@ export class Global extends HeyApiClient {
   public dispose<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
     return (options?.client ?? this.client).post<GlobalDisposeResponses, GlobalDisposeErrors, ThrowOnError>({
       url: "/global/dispose",
+      ...options,
+    })
+  }
+
+  /**
+   * Get session status across all directories
+   *
+   * Retrieve every non-idle session across all loaded instances, keyed by directory. Instances that are not currently loaded are not reported.
+   */
+  public sessionStatus<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<GlobalSessionStatusResponses, GlobalSessionStatusErrors, ThrowOnError>({
+      url: "/global/session/status",
       ...options,
     })
   }
